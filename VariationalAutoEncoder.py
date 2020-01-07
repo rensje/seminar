@@ -15,6 +15,7 @@ def encoder1(latent_dim, keep_prob):
         ])
 
 def decoder1(latent_dim, keep_prob):
+    raise NotImplementedError
     return tf.keras.Sequential([
         tf.keras.layers.InputLayer(input_shape=latent_dim),
         tf.keras.layers.Conv2DTranspose(filters=64, kernel_size=4, strides=1, padding="same", activation="relu"),
@@ -109,10 +110,8 @@ class VAE(tf.keras.Model):
       # kl = log_normal_pdf(z, mean, logvar)-log_normal_pdf(z, 0., 0.)
 
       c=self.kl_importance # some constant, can change later
-      loss = tf.reduce_mean(rec_loss/(2*c) + kl)
+      loss = tf.reduce_mean(rec_loss/2 + kl*self.kl_importance)
       return loss
-
-
 
       # x_logit = self.decode(z)
       # cross_ent = tf.nn.sigmoid_cross_entropy_with_logits(logits=x_logit, labels=x)
@@ -120,9 +119,6 @@ class VAE(tf.keras.Model):
       # logpz = log_normal_pdf(z, 0., 0.)
       # logqz_x = log_normal_pdf(z, mean, logvar)
       # return -tf.reduce_mean(logpx_z + logpz - logqz_x)
-
-
-
 
 
   @tf.function
