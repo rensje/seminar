@@ -25,7 +25,12 @@ class Trainer:
             policy,
             env,
             args,
-            test_env=None):
+            test_env=None,
+            custom_replay_buffer=None,
+            retrieve_new_exp=True,
+    ):
+        self.retrieve_new_exp = retrieve_new_exp
+        self.custom_replay_buffer = custom_replay_buffer
         self._policy = policy
         self._env = env
         self._test_env = self._env if test_env is None else test_env
@@ -62,52 +67,61 @@ class Trainer:
         episode_return = 0
         episode_start_time = time.perf_counter()
         n_episode = 0
+        fps=0
 
         # replay_buffer = get_replay_buffer(
         #     self._policy, self._env, self._use_prioritized_rb,
         #     self._use_nstep_rb, self._n_step)
 
-        replay_buffer = SimpleReplayBuffer(self._policy.memory_capacity)
+        replay_buffer = self.custom_replay_buffer if self.custom_replay_buffer is not None \
+            else SimpleReplayBuffer(self._policy.memory_capacity)
 
         self.replay_buffer = replay_buffer
 
         obs = self._env.reset()
 
         while total_steps < self._max_steps:
-            if total_steps < self._policy.n_warmup:
-                action = self._env.action_space.sample()
-            else:
-                action = self._policy.get_action(obs)
+            if self.retrieve_new_exp:
+                if total_steps < self._policy.n_warmup:
+                    action = self._env.action_space.sample()
+                else:
+                    action = self._policy.get_action(obs)
 
-            next_obs, reward, done, _ = self._env.step(action)
-            if self._show_progress:
-                self._env.render()
+
+                next_obs, reward, done, _ = self._env.step(action)
+
+                done_flag = done
+                if hasattr(self._env, "_max_episode_steps") and \
+                        episode_steps == self._env._max_episode_steps:
+                    done_flag = False
+                replay_buffer.add(obs=obs, act=action,
+                                  next_obs=next_obs, rew=reward, done=done_flag)
+                obs = next_obs
+
+                episode_return += reward
+
+
+                if done or episode_steps == self._episode_max_steps:
+                    obs = self._env.reset()
+
+                    n_episode += 1
+                    fps = episode_steps / (time.perf_counter() - episode_start_time)
+                    self.logger.info(
+                        "Total Epi: {0: 5} Steps: {1: 7} Episode Steps: {2: 5} Return: {3: 5.4f} FPS: {4:5.2f}".format(
+                            n_episode, total_steps, episode_steps, episode_return, fps))
+                    tf.summary.scalar(
+                        name="Common/training_return", data=episode_return)
+
+                    episode_steps = 0
+                    episode_return = 0
+                    episode_start_time = time.perf_counter()
+
             episode_steps += 1
-            episode_return += reward
             total_steps += 1
             tf.summary.experimental.set_step(total_steps)
 
-            done_flag = done
-            if hasattr(self._env, "_max_episode_steps") and \
-                    episode_steps == self._env._max_episode_steps:
-                done_flag = False
-            replay_buffer.add(obs=obs, act=action,
-                              next_obs=next_obs, rew=reward, done=done_flag)
-            obs = next_obs
-
-            if done or episode_steps == self._episode_max_steps:
-                obs = self._env.reset()
-
-                n_episode += 1
-                fps = episode_steps / (time.perf_counter() - episode_start_time)
-                self.logger.info("Total Epi: {0: 5} Steps: {1: 7} Episode Steps: {2: 5} Return: {3: 5.4f} FPS: {4:5.2f}".format(
-                    n_episode, total_steps, episode_steps, episode_return, fps))
-                tf.summary.scalar(
-                    name="Common/training_return", data=episode_return)
-
-                episode_steps = 0
-                episode_return = 0
-                episode_start_time = time.perf_counter()
+            if self._show_progress:
+                self._env.render()
 
             if total_steps < self._policy.n_warmup:
                 continue
@@ -132,6 +146,7 @@ class Trainer:
                     total_steps, avg_test_return, self._test_episodes))
                 tf.summary.scalar(
                     name="Common/average_test_return", data=avg_test_return)
+
                 tf.summary.scalar(name="Common/fps", data=fps)
                 self.writer.flush()
 
